@@ -1,6 +1,36 @@
 // Global variables
 let cipherEnabled = false;
+let cipherMode = 'dots';
 let observer = null;
+
+// Regex matching currency values ($, €, £, ¥) or percentage values
+const SENSITIVE_NUMBER_REGEX = /(\$|€|£|¥)\s*\d+(?:[.,]\d+)*(?:\.\d+)?|\b\d+(?:[.,]\d+)*(?:\.\d+)?\s*%/g;
+
+// Deterministic digit scrambler: same input always produces the same fake,
+// so values don't flicker when the observer re-processes them.
+function scrambleSeed(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+function scrambleMatch(match) {
+  let seed = scrambleSeed(match);
+  return match.replace(/\d/g, () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return String(seed % 10);
+  });
+}
+
+function replaceSensitiveNumbers(text) {
+  if (cipherMode === 'scramble') {
+    return text.replace(SENSITIVE_NUMBER_REGEX, scrambleMatch);
+  }
+  return text.replace(SENSITIVE_NUMBER_REGEX, '•••');
+}
 
 // Helper function to get a unique CSS selector for an element
 function getUniqueSelector(element) {
@@ -55,8 +85,9 @@ function initCipher() {
   }
   
   // Check initial state from storage
-  chrome.storage.local.get('cipherEnabled', (data) => {
+  chrome.storage.local.get(['cipherEnabled', 'cipherMode'], (data) => {
     cipherEnabled = data.cipherEnabled || false;
+    cipherMode = data.cipherMode === 'scramble' ? 'scramble' : 'dots';
     if (cipherEnabled) {
       startMasking();
     }
@@ -66,13 +97,25 @@ function initCipher() {
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'updateCipherState') {
       cipherEnabled = message.enabled;
-      
+
       if (cipherEnabled) {
         startMasking();
       } else {
         stopMasking();
       }
-      
+
+      sendResponse({ success: true });
+    } else if (message.action === 'updateCipherMode') {
+      const nextMode = message.mode === 'scramble' ? 'scramble' : 'dots';
+      if (nextMode !== cipherMode) {
+        cipherMode = nextMode;
+        // Reload to clear any DOM/CSS overlays from the previous mode and
+        // re-apply masking cleanly in the new style.
+        if (cipherEnabled) {
+          location.reload();
+          return;
+        }
+      }
       sendResponse({ success: true });
     }
   });
@@ -82,14 +125,17 @@ function initCipher() {
 function startMasking() {
   // First, mask existing content
   maskAllNumbers();
-  
-  // Specifically target table cells and grid layouts 
+
+  // Specifically target table cells and grid layouts
   // This helps with financial apps like Monarch Money
   maskTableData();
-  
-  // Override content display for financial apps
-  overrideFinancialAppDisplays();
-  
+
+  // Dots mode hides the real numbers behind a CSS overlay. Scramble mode
+  // needs the (fake) text to remain visible, so we skip that path.
+  if (cipherMode === 'dots') {
+    overrideFinancialAppDisplays();
+  }
+
   // Set up observer for new content
   setupObserver();
 }
@@ -364,40 +410,22 @@ function maskTableData() {
 // Process all text inside an element directly
 function processTextInElement(element) {
   if (!element || !shouldProcessNode(element)) return;
-  
-  // Only mask numbers with currency symbols ($, €, £, ¥) or percentage signs (%)
-  // This targets specifically sensitive financial data
-  const sensitiveNumberRegex = /(\$|€|£|¥)\s*\d+(?:[.,]\d+)*(?:\.\d+)?|\b\d+(?:[.,]\d+)*(?:\.\d+)?\s*%/g;
-  
+
   // Handle immediate text in this element (not in children)
   for (const node of element.childNodes) {
     if (node.nodeType === Node.TEXT_NODE) {
-      let text = node.textContent;
-      let hasNumbers = false;
-      
-      if (sensitiveNumberRegex.test(text)) {
-        text = text.replace(sensitiveNumberRegex, '•••');
-        hasNumbers = true;
-      }
-      
-      if (hasNumbers) {
-        node.textContent = text;
+      const replaced = replaceSensitiveNumbers(node.textContent);
+      if (replaced !== node.textContent) {
+        node.textContent = replaced;
       }
     }
   }
-  
+
   // In case the element has no child text nodes but has direct textContent
   if (element.childNodes.length === 0 && element.textContent.trim() !== '') {
-    let text = element.textContent;
-    let hasNumbers = false;
-    
-    if (sensitiveNumberRegex.test(text)) {
-      text = text.replace(sensitiveNumberRegex, '•••');
-      hasNumbers = true;
-    }
-    
-    if (hasNumbers) {
-      element.textContent = text;
+    const replaced = replaceSensitiveNumbers(element.textContent);
+    if (replaced !== element.textContent) {
+      element.textContent = replaced;
     }
   }
 }
@@ -468,8 +496,11 @@ function setupObserver() {
 
 // Process all existing numbers on the page
 function maskAllNumbers() {
-  // Special handling for the budget summary box in the top right - specifically target number-flow-react
-  const numberFlowElements = document.querySelectorAll('number-flow-react, .fs-mask');
+  // Special handling for the budget summary box in the top right - specifically target number-flow-react.
+  // This path hides the real digits behind a dots overlay, so it only applies in dots mode.
+  const numberFlowElements = cipherMode === 'dots'
+    ? document.querySelectorAll('number-flow-react, .fs-mask')
+    : [];
   numberFlowElements.forEach(element => {
     // Make the element and all its children transparent
     element.style.color = 'transparent';
@@ -626,27 +657,15 @@ function processNode(node) {
 // Process a text node to mask numbers
 function processTextNode(node) {
   if (!node || !node.textContent) return;
-  
+
   // Skip if parent element should not be processed
   if (node.parentElement && !shouldProcessNode(node.parentElement)) {
     return;
   }
-  
-  // Only mask numbers with currency symbols ($, €, £, ¥) or percentage signs (%)
-  // This targets specifically sensitive financial data
-  const sensitiveNumberRegex = /(\$|€|£|¥)\s*\d+(?:[.,]\d+)*(?:\.\d+)?|\b\d+(?:[.,]\d+)*(?:\.\d+)?\s*%/g;
-  
-  // Replace only sensitive numbers with the mask
-  let text = node.textContent;
-  let hasNumbers = false;
-  
-  if (sensitiveNumberRegex.test(text)) {
-    text = text.replace(sensitiveNumberRegex, '•••');
-    hasNumbers = true;
-  }
-  
-  if (hasNumbers) {
-    node.textContent = text;
+
+  const replaced = replaceSensitiveNumbers(node.textContent);
+  if (replaced !== node.textContent) {
+    node.textContent = replaced;
   }
 }
 

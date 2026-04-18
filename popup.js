@@ -2,40 +2,54 @@
 const toggleSwitch = document.getElementById('cipherToggle');
 const statusOn = document.getElementById('status-on');
 const statusOff = document.getElementById('status-off');
+const modeContainer = document.querySelector('.mode-container');
+const modeRadios = document.querySelectorAll('input[name="cipherMode"]');
 
 // Initialize popup state
 document.addEventListener('DOMContentLoaded', () => {
-  // Get current state from storage
   chrome.runtime.sendMessage({ action: 'getCipherState' }, (response) => {
-    if (response && typeof response.enabled === 'boolean') {
+    if (!response) return;
+    if (typeof response.enabled === 'boolean') {
       toggleSwitch.checked = response.enabled;
       updateStatusDisplay(response.enabled);
     }
+    const mode = response.mode === 'scramble' ? 'scramble' : 'dots';
+    modeRadios.forEach(radio => { radio.checked = radio.value === mode; });
+    updateModeAvailability(toggleSwitch.checked);
   });
 });
 
 // Handle toggle switch changes
 toggleSwitch.addEventListener('change', (e) => {
   const isEnabled = e.target.checked;
-  
-  // Send message to background script
-  chrome.runtime.sendMessage({ 
-    action: 'toggleCipher', 
-    enabled: isEnabled 
+  chrome.runtime.sendMessage({
+    action: 'toggleCipher',
+    enabled: isEnabled
   }, (response) => {
     if (response && response.success) {
       updateStatusDisplay(isEnabled);
+      updateModeAvailability(isEnabled);
     }
   });
 });
 
-// Update the status display
+// Handle mode selection changes
+modeRadios.forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    if (!e.target.checked) return;
+    chrome.runtime.sendMessage({
+      action: 'setCipherMode',
+      mode: e.target.value
+    });
+  });
+});
+
 function updateStatusDisplay(isEnabled) {
-  if (isEnabled) {
-    statusOn.style.display = 'flex';
-    statusOff.style.display = 'none';
-  } else {
-    statusOn.style.display = 'none';
-    statusOff.style.display = 'flex';
-  }
+  statusOn.style.display = isEnabled ? 'flex' : 'none';
+  statusOff.style.display = isEnabled ? 'none' : 'flex';
+}
+
+function updateModeAvailability(isEnabled) {
+  if (!modeContainer) return;
+  modeContainer.classList.toggle('disabled', !isEnabled);
 }

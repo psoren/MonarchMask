@@ -1,34 +1,41 @@
 // Initialize extension state
 chrome.runtime.onInstalled.addListener(() => {
-  // Default state is OFF
-  chrome.storage.local.set({ cipherEnabled: false });
+  chrome.storage.local.get(['cipherEnabled', 'cipherMode'], (data) => {
+    const defaults = {};
+    if (typeof data.cipherEnabled !== 'boolean') defaults.cipherEnabled = false;
+    if (data.cipherMode !== 'dots' && data.cipherMode !== 'scramble') defaults.cipherMode = 'dots';
+    if (Object.keys(defaults).length) chrome.storage.local.set(defaults);
+  });
 });
+
+function broadcast(message) {
+  chrome.tabs.query({}, (tabs) => {
+    tabs.forEach(tab => {
+      chrome.tabs.sendMessage(tab.id, message).catch(error => {
+        console.debug('Could not send message to tab', tab.id, error);
+      });
+    });
+  });
+}
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'toggleCipher') {
-    // Update storage with new state
     chrome.storage.local.set({ cipherEnabled: message.enabled });
-    
-    // Send message to all tabs to update their state
-    chrome.tabs.query({}, (tabs) => {
-      tabs.forEach(tab => {
-        chrome.tabs.sendMessage(tab.id, { 
-          action: 'updateCipherState', 
-          enabled: message.enabled 
-        }).catch(error => {
-          // Suppress errors for tabs that can't receive messages
-          console.debug('Could not send message to tab', tab.id, error);
-        });
-      });
-    });
-    
+    broadcast({ action: 'updateCipherState', enabled: message.enabled });
+    sendResponse({ success: true });
+  } else if (message.action === 'setCipherMode') {
+    const mode = message.mode === 'scramble' ? 'scramble' : 'dots';
+    chrome.storage.local.set({ cipherMode: mode });
+    broadcast({ action: 'updateCipherMode', mode });
     sendResponse({ success: true });
   } else if (message.action === 'getCipherState') {
-    // Return current state
-    chrome.storage.local.get('cipherEnabled', (data) => {
-      sendResponse({ enabled: data.cipherEnabled });
+    chrome.storage.local.get(['cipherEnabled', 'cipherMode'], (data) => {
+      sendResponse({
+        enabled: !!data.cipherEnabled,
+        mode: data.cipherMode === 'scramble' ? 'scramble' : 'dots'
+      });
     });
-    return true; // Required for async sendResponse
+    return true;
   }
 });

@@ -105,6 +105,43 @@ input:checked + .slider:before {
   border-radius: 50%;
 }
 
+/* Mode selector */
+.mode-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0 12px;
+}
+
+.mode-label {
+  font-size: 16px;
+  font-weight: 500;
+  color: #1c1c1e;
+}
+
+.mode-options {
+  display: flex;
+  gap: 12px;
+}
+
+.mode-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+  color: #1c1c1e;
+  cursor: pointer;
+}
+
+.mode-option input[type="radio"] {
+  accent-color: #2196F3;
+}
+
+.mode-container.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 /* Divider */
 .divider {
   height: 1px;
