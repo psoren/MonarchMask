@@ -47,7 +47,7 @@ function getUniqueSelector(element) {
 // Initialize the extension
 function initCipher() {
   // Check if this is Monarch Money
-  const isMonarchMoney = window.location.hostname.includes('monarchmoney.com');
+  const isMonarchMoney = window.location.hostname.includes('monarch.com');
   
   // Only run on Monarch Money
   if (!isMonarchMoney) {
@@ -321,7 +321,7 @@ function overrideFinancialAppDisplays() {
       element.classList.add('cipher-masked');
       
       // If Monarch Money is detected, apply additional specific masking
-      if (window.location.hostname.includes('monarchmoney')) {
+      if (window.location.hostname.includes('monarch')) {
         // Apply more specific selectors for Monarch Money
         if (element.closest('[class*="budget"]') || 
             element.closest('[class*="amount"]')) {
